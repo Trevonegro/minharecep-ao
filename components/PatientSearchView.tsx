@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQueue } from '../context/QueueContext';
 import { Search, User, Calendar, CreditCard, Repeat, X, Stethoscope, CheckCircle } from 'lucide-react';
-import { DEPARTMENT_LABELS, PRIORITY_LABELS, STATUS_LABELS } from '../constants';
+import { DEPARTMENT_LABELS, STATUS_LABELS } from '../constants';
 import { TicketStatus, Ticket, Department, Priority } from '../types';
 
 // Duplicate ToothIcon locally to ensure it works without refactoring entire shared components

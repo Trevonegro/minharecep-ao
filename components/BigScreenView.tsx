@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQueue } from '../context/QueueContext';
-import { DEPARTMENT_LABELS, PRIORITY_LABELS } from '../constants';
-import { Ticket, TicketStatus } from '../types';
+import { DEPARTMENT_LABELS } from '../constants';
+import { TicketStatus } from '../types';
 import { ArrowRight, Volume2, VolumeX, Monitor } from 'lucide-react';
 
 export const BigScreenView: React.FC = () => {
