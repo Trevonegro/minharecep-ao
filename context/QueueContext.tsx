@@ -33,7 +33,8 @@ const mapTicketFromDB = (dbTicket: any): Ticket => ({
 export const QueueProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [tickets, setTickets] = useState<Ticket[]>([]);
 
-  const fetchTickets = async () => {
+  // Fetch tickets from DB
+  const fetchTickets = useCallback(async () => {
     // Fetch tickets from the last 24 hours to keep the list relevant
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
@@ -47,9 +48,10 @@ export const QueueProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     if (data && !error) {
       setTickets(data.map(mapTicketFromDB));
     }
-  };
+  }, []);
 
   useEffect(() => {
+    // Initial fetch
     fetchTickets();
 
     // Realtime subscription
@@ -58,30 +60,36 @@ export const QueueProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'tickets' },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setTickets(prev => [...prev, mapTicketFromDB(payload.new)]);
-          } else if (payload.eventType === 'UPDATE') {
-            setTickets(prev => prev.map(t => 
-              t.id === payload.new.id ? mapTicketFromDB(payload.new) : t
-            ));
-          }
+        () => {
+          // Whenever a change happens, re-fetch the full list to ensure consistency
+          fetchTickets();
         }
       )
       .subscribe();
 
+    // Polling Mechanism (Safety Net)
+    // Fetches data every 5 seconds to ensure sync across devices even if WebSocket drops
+    const pollInterval = setInterval(() => {
+      fetchTickets();
+    }, 5000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(pollInterval);
     };
-  }, []);
+  }, [fetchTickets]);
 
   const addTicket = useCallback(async (patientName: string, department: Department, priority: Priority, cpf?: string) => {
-    // Calculate next ticket number based on today's count
-    // NOTE: In a high-concurrency prod env, use a DB sequence or trigger. 
-    // For this app, counting local state of today's tickets is acceptable.
-    
-    // Simple logic: Get max ticket number from current list or start at 1
-    const maxTicket = tickets.reduce((max, t) => t.ticketNumber > max ? t.ticketNumber : max, 0);
+    // Robust Ticket Number Generation:
+    // Query the DB for the absolute last ticket number instead of relying on local state
+    // This prevents duplicate numbers when multiple receptions are working simultaneously.
+    const { data: lastTicketData } = await supabase
+        .from('tickets')
+        .select('ticket_number')
+        .order('ticket_number', { ascending: false })
+        .limit(1);
+
+    const maxTicket = lastTicketData && lastTicketData.length > 0 ? lastTicketData[0].ticket_number : 0;
     const nextNumber = maxTicket + 1;
 
     const { error } = await supabase.from('tickets').insert({
@@ -94,8 +102,13 @@ export const QueueProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       created_at: new Date().toISOString()
     });
 
-    if (error) console.error("Error adding ticket:", error);
-  }, [tickets]);
+    if (error) {
+        console.error("Error adding ticket:", error);
+    } else {
+        // Update immediately for a snappy UI
+        fetchTickets();
+    }
+  }, [fetchTickets]);
 
   const callNextTicket = useCallback(async (department: Department, doctorName: string, officeName: string) => {
     // Find the correct ticket to call (Logic mirrored from local version)
@@ -121,9 +134,13 @@ export const QueueProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       })
       .eq('id', nextTicket.id);
 
-    if (error) console.error("Error calling ticket:", error);
+    if (error) {
+        console.error("Error calling ticket:", error);
+    } else {
+        fetchTickets();
+    }
 
-  }, [tickets]);
+  }, [tickets, fetchTickets]);
 
   const recallTicket = useCallback(async (ticketId: string) => {
      // Update timestamp to re-trigger effects on BigScreen
@@ -135,8 +152,12 @@ export const QueueProvider: React.FC<{ children: ReactNode }> = ({ children }) =
        })
        .eq('id', ticketId);
 
-     if (error) console.error("Error recalling ticket:", error);
-  }, []);
+     if (error) {
+         console.error("Error recalling ticket:", error);
+     } else {
+         fetchTickets();
+     }
+  }, [fetchTickets]);
 
   const finishTicket = useCallback(async (ticketId: string) => {
     const { error } = await supabase
@@ -147,8 +168,12 @@ export const QueueProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       })
       .eq('id', ticketId);
       
-    if (error) console.error("Error finishing ticket:", error);
-  }, []);
+    if (error) {
+        console.error("Error finishing ticket:", error);
+    } else {
+        fetchTickets();
+    }
+  }, [fetchTickets]);
 
   const getWaitingCount = useCallback((department: Department) => {
     return tickets.filter(t => t.department === department && t.status === TicketStatus.WAITING).length;
